@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, Platform, ProductVariation } from '../types';
-import { X, Sparkles, Loader2, Image as ImageIcon, Trash2, Link as LinkIcon, Upload, Plus, Layers, AlertCircle } from 'lucide-react';
+import { Product, Platform, ProductVariation, Attribute } from '../types';
+import { X, Sparkles, Loader2, Image as ImageIcon, Trash2, Link as LinkIcon, Upload, Plus, Layers, AlertCircle, Wand2, Package } from 'lucide-react';
 import { generateProductDescription } from '../services/geminiService';
 import { translateToSquare, translateToWooCommerce } from '../services/platformAdapter';
 
@@ -9,9 +9,10 @@ interface ProductFormProps {
   initialData?: Product;
   onSave: (product: Product) => void;
   onClose: () => void;
+  attributes: Attribute[];
 }
 
-export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, onClose }) => {
+export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, onClose, attributes }) => {
   const [formData, setFormData] = useState<Partial<Product>>({
     name: '',
     sku: '',
@@ -22,7 +23,9 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
     platforms: Platform.WooCommerce,
     image: 'https://picsum.photos/200/200?random=10',
     hasVariations: false,
-    variations: []
+    variations: [],
+    weight: 0,
+    dimensions: { length: 0, width: 0, height: 0 }
   });
   
   // Variation editing state
@@ -33,6 +36,13 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
   const [variationPrice, setVariationPrice] = useState(0);
   const [variationStock, setVariationStock] = useState(0);
   
+  // Attribute Generator State
+  const [selectedAttrId, setSelectedAttrId] = useState<string>('');
+  const [selectedTerms, setSelectedTerms] = useState<string[]>([]);
+  const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
+  const [genPrice, setGenPrice] = useState<number>(0);
+  const [genStock, setGenStock] = useState<number>(10);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,7 +52,6 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
     }
   }, [initialData]);
 
-  // Recalculate stock if variations change
   useEffect(() => {
     if (formData.hasVariations && formData.variations) {
         const totalStock = formData.variations.reduce((acc, curr) => acc + curr.stockLevel, 0);
@@ -54,7 +63,20 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'price' || name === 'stockLevel' ? parseFloat(value) || 0 : value
+      [name]: ['price', 'stockLevel', 'weight'].includes(name) ? parseFloat(value) || 0 : value
+    }));
+  };
+
+  const handleDimensionChange = (field: 'length' | 'width' | 'height', value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      dimensions: {
+        length: 0,
+        width: 0,
+        height: 0,
+        ...(prev.dimensions || {}),
+        [field]: parseFloat(value) || 0
+      }
     }));
   };
 
@@ -94,13 +116,19 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
     }
   };
 
-  // Variation Handlers
+  const openGenerator = () => {
+    setGenPrice(formData.price || 0);
+    setGenStock(10);
+    setIsGeneratorOpen(true);
+    setIsAddingVariation(false);
+  };
+
+  // Manual Variation Add
   const addVariation = () => {
     if (!variationName) return;
     
-    // Parse attributes from name (Simple parser for demo: "Small - Red")
     const parts = variationName.split('-').map(s => s.trim());
-    const attributes = parts.length > 1 
+    const attributesList = parts.length > 1 
         ? [{ name: 'Option 1', option: parts[0] }, { name: 'Option 2', option: parts[1] }] 
         : [{ name: 'Attribute', option: parts[0] }];
 
@@ -110,7 +138,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
         sku: variationSku || `${formData.sku}-${variationName.replace(/\s+/g, '')}`,
         price: variationPrice || (formData.price || 0),
         stockLevel: variationStock,
-        attributes
+        attributes: attributesList
     };
 
     setFormData(prev => ({
@@ -118,7 +146,6 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
         variations: [...(prev.variations || []), newVariation]
     }));
 
-    // Reset fields
     setVariationName('');
     setVariationSku('');
     setVariationPrice(formData.price || 0);
@@ -132,6 +159,40 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
         variations: prev.variations?.filter(v => v.id !== id)
     }));
   };
+  
+  // Attribute Generator Logic
+  const generateFromAttributes = () => {
+      if (!selectedAttrId || selectedTerms.length === 0) return;
+      
+      const attr = attributes.find(a => a.id === selectedAttrId);
+      if (!attr) return;
+
+      const newVariations: ProductVariation[] = selectedTerms.map(term => ({
+          id: Math.random().toString(36).substr(2, 9),
+          name: `${term}`,
+          sku: `${formData.sku}-${term.toUpperCase()}`,
+          price: genPrice,
+          stockLevel: genStock,
+          attributes: [{ name: attr.name, option: term }]
+      }));
+
+      setFormData(prev => ({
+          ...prev,
+          variations: [...(prev.variations || []), ...newVariations]
+      }));
+      
+      setIsGeneratorOpen(false);
+      setSelectedTerms([]);
+      setSelectedAttrId('');
+  };
+
+  const toggleTerm = (term: string) => {
+      if (selectedTerms.includes(term)) {
+          setSelectedTerms(prev => prev.filter(t => t !== term));
+      } else {
+          setSelectedTerms(prev => [...prev, term]);
+      }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,7 +203,6 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
         lastSynced: new Date().toISOString()
       } as Product;
       
-      // Log translations to console to demonstrate the adapter logic
       console.log('WooCommerce Payload:', translateToWooCommerce(finalProduct));
       console.log('Square Payload:', translateToSquare(finalProduct));
 
@@ -228,7 +288,6 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
                 onChange={handleChange}
                 required
                 className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
-                placeholder="e.g. Vintage Leather Bag"
               />
             </div>
             <div className="space-y-2">
@@ -240,7 +299,6 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
                 onChange={handleChange}
                 required
                 className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
-                placeholder="SKU-001"
               />
             </div>
           </div>
@@ -324,56 +382,192 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
                         ))}
                     </div>
 
-                    {/* Add Variation Form */}
-                    {isAddingVariation ? (
-                        <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-indigo-200 dark:border-indigo-900 space-y-3 animate-in fade-in slide-in-from-top-2">
-                            <div className="grid grid-cols-2 gap-3">
-                                <input
-                                    type="text"
-                                    placeholder="Name (e.g. Small - Red)"
-                                    value={variationName}
-                                    onChange={e => setVariationName(e.target.value)}
-                                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
-                                />
-                                 <input
-                                    type="text"
-                                    placeholder="SKU (Optional)"
-                                    value={variationSku}
-                                    onChange={e => setVariationSku(e.target.value)}
-                                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
-                                />
-                                <input
-                                    type="number"
-                                    placeholder="Price"
-                                    value={variationPrice}
-                                    onChange={e => setVariationPrice(parseFloat(e.target.value))}
-                                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
-                                />
-                                <input
-                                    type="number"
-                                    placeholder="Stock"
-                                    value={variationStock}
-                                    onChange={e => setVariationStock(parseFloat(e.target.value))}
-                                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
-                                />
+                    {/* Action Buttons: Add Manual or Generate */}
+                    <div className="flex gap-2">
+                         {isGeneratorOpen ? (
+                             <div className="w-full p-4 bg-white dark:bg-gray-800 rounded-lg border border-indigo-200 dark:border-indigo-900 animate-in fade-in slide-in-from-top-2">
+                                <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                                    <Wand2 size={14} className="text-indigo-500" /> Generate Variations
+                                </h4>
+                                <div className="space-y-3">
+                                    <select 
+                                        value={selectedAttrId}
+                                        onChange={(e) => {
+                                            setSelectedAttrId(e.target.value);
+                                            setSelectedTerms([]);
+                                        }}
+                                        className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 dark:text-white outline-none"
+                                    >
+                                        <option value="">Select Attribute...</option>
+                                        {attributes.map(attr => (
+                                            <option key={attr.id} value={attr.id}>{attr.name}</option>
+                                        ))}
+                                    </select>
+                                    
+                                    {selectedAttrId && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {attributes.find(a => a.id === selectedAttrId)?.terms.map(term => (
+                                                <button
+                                                    key={term}
+                                                    type="button"
+                                                    onClick={() => toggleTerm(term)}
+                                                    className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
+                                                        selectedTerms.includes(term)
+                                                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                                                        : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+                                                    }`}
+                                                >
+                                                    {term}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 gap-3 pt-2">
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Var Price</label>
+                                            <input 
+                                                type="number" 
+                                                value={genPrice}
+                                                onChange={(e) => setGenPrice(parseFloat(e.target.value))}
+                                                className="w-full px-2 py-1.5 text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-white outline-none"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Var Stock</label>
+                                            <input 
+                                                type="number" 
+                                                value={genStock}
+                                                onChange={(e) => setGenStock(parseFloat(e.target.value))}
+                                                className="w-full px-2 py-1.5 text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-white outline-none"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end gap-2 mt-2">
+                                        <button onClick={() => setIsGeneratorOpen(false)} type="button" className="px-3 py-1.5 text-xs font-medium text-gray-500">Cancel</button>
+                                        <button 
+                                            onClick={generateFromAttributes}
+                                            disabled={!selectedAttrId || selectedTerms.length === 0}
+                                            type="button" 
+                                            className="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                                        >
+                                            Generate {selectedTerms.length > 0 ? selectedTerms.length : ''} Variations
+                                        </button>
+                                    </div>
+                                </div>
+                             </div>
+                         ) : isAddingVariation ? (
+                             <div className="w-full p-4 bg-white dark:bg-gray-800 rounded-lg border border-indigo-200 dark:border-indigo-900 space-y-3 animate-in fade-in slide-in-from-top-2">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Name (e.g. Small - Red)"
+                                        value={variationName}
+                                        onChange={e => setVariationName(e.target.value)}
+                                        className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="SKU (Optional)"
+                                        value={variationSku}
+                                        onChange={e => setVariationSku(e.target.value)}
+                                        className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Price"
+                                        value={variationPrice}
+                                        onChange={e => setVariationPrice(parseFloat(e.target.value))}
+                                        className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Stock"
+                                        value={variationStock}
+                                        onChange={e => setVariationStock(parseFloat(e.target.value))}
+                                        className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                                    />
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                    <button onClick={() => setIsAddingVariation(false)} type="button" className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400">Cancel</button>
+                                    <button onClick={addVariation} type="button" className="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Add</button>
+                                </div>
                             </div>
-                            <div className="flex justify-end gap-2">
-                                <button onClick={() => setIsAddingVariation(false)} type="button" className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400">Cancel</button>
-                                <button onClick={addVariation} type="button" className="px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Add</button>
-                            </div>
-                        </div>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={() => setIsAddingVariation(true)}
-                            className="w-full py-2 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
-                        >
-                            <Plus size={16} />
-                            Add Variation
-                        </button>
-                    )}
+                         ) : (
+                             <>
+                                <button
+                                    type="button"
+                                    onClick={() => { setIsAddingVariation(true); setIsGeneratorOpen(false); }}
+                                    className="flex-1 py-2 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Plus size={16} />
+                                    Add Manually
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={openGenerator}
+                                    className="flex-1 py-2 border border-dashed border-indigo-300 dark:border-indigo-700 rounded-lg text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Wand2 size={16} />
+                                    Generate from Attributes
+                                </button>
+                             </>
+                         )}
+                    </div>
                 </div>
             )}
+          </div>
+
+          {/* Shipping Information Section */}
+          <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl border border-gray-100 dark:border-gray-700 space-y-4">
+              <h3 className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                  <Package size={16} /> Shipping Information
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Weight (kg)</label>
+                      <input
+                          type="number"
+                          name="weight"
+                          value={formData.weight || ''}
+                          onChange={handleChange}
+                          placeholder="0.0"
+                          step="0.1"
+                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                      />
+                  </div>
+                  <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Length (cm)</label>
+                      <input
+                          type="number"
+                          value={formData.dimensions?.length || ''}
+                          onChange={(e) => handleDimensionChange('length', e.target.value)}
+                          placeholder="0"
+                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                      />
+                  </div>
+                  <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Width (cm)</label>
+                      <input
+                          type="number"
+                          value={formData.dimensions?.width || ''}
+                          onChange={(e) => handleDimensionChange('width', e.target.value)}
+                          placeholder="0"
+                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                      />
+                  </div>
+                  <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Height (cm)</label>
+                      <input
+                          type="number"
+                          value={formData.dimensions?.height || ''}
+                          onChange={(e) => handleDimensionChange('height', e.target.value)}
+                          placeholder="0"
+                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                      />
+                  </div>
+              </div>
           </div>
 
           {/* Common Fields */}
@@ -399,10 +593,11 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
                 type="button"
                 onClick={handleGenerateDescription}
                 disabled={isGenerating || !formData.name}
-                className="text-xs flex items-center gap-1.5 text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium disabled:opacity-50"
+                title={!formData.name ? "Enter a product name first" : "Generate description using AI"}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                Auto-Generate with AI
+                {isGenerating ? 'Generating...' : 'Auto-Generate with AI'}
               </button>
             </div>
             <textarea
@@ -428,7 +623,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({ initialData, onSave, o
                 <option value={Platform.Both}>Sync Both</option>
               </select>
               <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-                Data will be automatically formatted for each platform (Attributes for WooCommerce, Item Variations for Square).
+                Data will be automatically formatted for each platform (Attributes for WooCommerce, Item Options for Square).
               </p>
             </div>
 

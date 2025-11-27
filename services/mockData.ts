@@ -1,11 +1,17 @@
 
-import { Product, Platform, Integration, UserProfile } from '../types';
+import { Product, Platform, Integration, UserProfile, Attribute } from '../types';
 
 export const INITIAL_USER_PROFILE: UserProfile = {
   name: 'Admin User',
   email: 'admin@syncmaster.ai',
   avatar: ''
 };
+
+export const INITIAL_ATTRIBUTES: Attribute[] = [
+  { id: '1', name: 'Size', slug: 'pa_size', terms: ['Small', 'Medium', 'Large'] },
+  { id: '2', name: 'Color', slug: 'pa_color', terms: ['Red', 'Blue', 'Black', 'White'] },
+  { id: '3', name: 'Material', slug: 'pa_material', terms: ['Cotton', 'Polyester', 'Wool'] }
+];
 
 export const INITIAL_PRODUCTS: Product[] = [
   {
@@ -20,7 +26,13 @@ export const INITIAL_PRODUCTS: Product[] = [
     lastSynced: new Date().toISOString(),
     image: 'https://picsum.photos/200/200?random=1',
     hasVariations: false,
-    variations: []
+    variations: [],
+    weight: 1.2,
+    dimensions: {
+      length: 30,
+      width: 10,
+      height: 25
+    }
   },
   {
     id: '2',

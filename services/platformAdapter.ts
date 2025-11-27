@@ -1,4 +1,3 @@
-
 import { Product, ProductVariation } from "../types";
 
 /**
@@ -8,6 +7,15 @@ import { Product, ProductVariation } from "../types";
  * - Variations are separate endpoints/objects linked to parent
  */
 export const translateToWooCommerce = (product: Product) => {
+  const commonData = {
+    weight: product.weight?.toString(),
+    dimensions: {
+      length: product.dimensions?.length.toString(),
+      width: product.dimensions?.width.toString(),
+      height: product.dimensions?.height.toString()
+    }
+  };
+
   if (!product.hasVariations) {
     return {
       name: product.name,
@@ -17,7 +25,8 @@ export const translateToWooCommerce = (product: Product) => {
       sku: product.sku,
       manage_stock: true,
       stock_quantity: product.stockLevel,
-      categories: [{ name: product.category }]
+      categories: [{ name: product.category }],
+      ...commonData
     };
   }
 
@@ -57,37 +66,94 @@ export const translateToWooCommerce = (product: Product) => {
     description: product.description,
     sku: product.sku, // Parent SKU
     attributes: wooAttributes,
-    _variations_payload: wooVariations // In real API, these are created sequentially
+    _variations_payload: wooVariations, // In real API, these are created sequentially
+    ...commonData
   };
 };
 
 /**
  * Square Structure:
- * - Everything is a CatalogItem
- * - item_data.variations is a list of CatalogItemVariation
- * - Even simple items have 1 variation
+ * - Uses CatalogItemOption for variation attributes (Size, Color)
+ * - item_data.item_options defines the available options
+ * - item_data.variations.item_variation_data.item_option_values links specific values
  */
 export const translateToSquare = (product: Product) => {
   let squareVariations;
+  let itemOptions: any[] = [];
+
+  // Helper for generating IDs safely without relying on crypto.randomUUID
+  const generateId = () => Math.random().toString(36).substr(2, 9);
 
   if (product.hasVariations && product.variations) {
-    squareVariations = product.variations.map(v => ({
-      type: 'ITEM_VARIATION',
-      id: `#${v.id}`, // Temporary ID for creation
-      item_variation_data: {
-        item_id: `#${product.id}`,
-        name: v.name, // e.g. "Small - Blue"
-        sku: v.sku,
-        pricing_type: 'FIXED_PRICING',
-        price_money: {
-          amount: Math.round(v.price * 100), // Square uses cents
-          currency: 'USD'
-        },
-        location_overrides: [{ track_inventory: true }] // Stock is handled via Inventory API, not Catalog
-      }
-    }));
+    // 1. Identify all unique Options (Attributes)
+    const optionsMap = new Map<string, Set<string>>(); // Name -> Set of Values
+    
+    product.variations.forEach(v => {
+      v.attributes.forEach(attr => {
+         if (!optionsMap.has(attr.name)) {
+             optionsMap.set(attr.name, new Set());
+         }
+         optionsMap.get(attr.name)?.add(attr.option);
+      });
+    });
+
+    // 2. Create item_options definitions for Square
+    // We need to generate temporary IDs for these options to reference them
+    const optionIds: Record<string, string> = {}; 
+    
+    Array.from(optionsMap.entries()).forEach(([name, values], index) => {
+        const optionId = `#opt_${index}`;
+        optionIds[name] = optionId;
+        
+        itemOptions.push({
+            type: 'ITEM_OPTION',
+            id: optionId,
+            item_option_data: {
+                name: name,
+                values: Array.from(values).map((val, valIndex) => ({
+                    id: `${optionId}_val_${valIndex}`, // Temp ID
+                    item_option_value_data: {
+                        name: val
+                    }
+                }))
+            }
+        });
+    });
+
+    // 3. Map variations referencing these options
+    squareVariations = product.variations.map(v => {
+      // Find the specific value IDs for this variation
+      const itemOptionValues = v.attributes.map(attr => {
+          const optionId = optionIds[attr.name];
+          const optionDef = itemOptions.find(o => o.id === optionId);
+          const valueDef = optionDef?.item_option_data.values.find((val: any) => val.item_option_value_data.name === attr.option);
+          
+          return {
+              item_option_id: optionId,
+              item_option_value_id: valueDef?.id
+          };
+      });
+
+      return {
+        type: 'ITEM_VARIATION',
+        id: `#${v.id}`,
+        item_variation_data: {
+          item_id: `#${product.id}`,
+          name: v.name, // e.g. "Small - Blue"
+          sku: v.sku,
+          pricing_type: 'FIXED_PRICING',
+          price_money: {
+            amount: Math.round(v.price * 100),
+            currency: 'USD'
+          },
+          track_inventory: true,
+          item_option_values: itemOptionValues
+        }
+      };
+    });
+
   } else {
-    // Simple product is just one variation in Square
+    // Simple product
     squareVariations = [{
       type: 'ITEM_VARIATION',
       id: '#regular',
@@ -104,8 +170,8 @@ export const translateToSquare = (product: Product) => {
     }];
   }
 
-  return {
-    idempotency_key: crypto.randomUUID(),
+  const payload: any = {
+    idempotency_key: generateId(),
     object: {
       type: 'ITEM',
       id: `#${product.id}`,
@@ -116,4 +182,10 @@ export const translateToSquare = (product: Product) => {
       }
     }
   };
+
+  if (itemOptions.length > 0) {
+      payload.object.item_data.item_options = itemOptions;
+  }
+
+  return payload;
 };

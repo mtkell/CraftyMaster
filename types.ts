@@ -19,6 +19,13 @@ export interface UserProfile {
   avatar?: string;
 }
 
+export interface Attribute {
+  id: string;
+  name: string; // e.g. Color
+  slug: string; // e.g. pa_color
+  terms: string[]; // e.g. Red, Blue, Green
+}
+
 export interface ProductVariation {
   id: string;
   name: string; // e.g., "Small - Blue"
@@ -41,6 +48,12 @@ export interface Product {
   image?: string;
   hasVariations: boolean;
   variations?: ProductVariation[];
+  weight?: number; // in kg
+  dimensions?: {
+    length: number;
+    width: number;
+    height: number;
+  };
 }
 
 export interface DashboardStats {

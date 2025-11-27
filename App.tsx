@@ -1,12 +1,14 @@
+
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { Dashboard } from './components/Dashboard';
 import { InventoryList } from './components/InventoryList';
 import { ProductForm } from './components/ProductForm';
 import { Settings } from './components/Settings';
-import { INITIAL_PRODUCTS, INITIAL_INTEGRATIONS, INITIAL_USER_PROFILE } from './services/mockData';
-import { Product, Integration, Theme, UserProfile } from './types';
-import { LayoutDashboard, Package, ArrowLeftRight, Settings as SettingsIcon, Bell } from 'lucide-react';
+import { Attributes } from './components/Attributes';
+import { INITIAL_PRODUCTS, INITIAL_INTEGRATIONS, INITIAL_USER_PROFILE, INITIAL_ATTRIBUTES } from './services/mockData';
+import { Product, Integration, Theme, UserProfile, Attribute } from './types';
+import { LayoutDashboard, Package, ArrowLeftRight, Settings as SettingsIcon, Bell, Tags } from 'lucide-react';
 
 const NavLink = ({ to, icon: Icon, label }: { to: string, icon: any, label: string }) => {
   const location = useLocation();
@@ -40,6 +42,7 @@ const Layout = ({ children, userProfile }: { children?: React.ReactNode, userPro
       <nav className="space-y-1 flex-1">
         <NavLink to="/" icon={LayoutDashboard} label="Dashboard" />
         <NavLink to="/inventory" icon={Package} label="Inventory" />
+        <NavLink to="/attributes" icon={Tags} label="Attributes" />
       </nav>
 
       <div className="mt-auto pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -82,6 +85,7 @@ const App = () => {
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS);
   const [userProfile, setUserProfile] = useState<UserProfile>(INITIAL_USER_PROFILE);
+  const [attributes, setAttributes] = useState<Attribute[]>(INITIAL_ATTRIBUTES);
   const [editingProduct, setEditingProduct] = useState<Product | undefined>(undefined);
   const [isModalOpen, setIsModalOpen] = useState(false);
   
@@ -108,7 +112,6 @@ const App = () => {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Listen for system theme changes if in system mode
   useEffect(() => {
     if (theme !== 'system') return;
 
@@ -166,6 +169,15 @@ const App = () => {
               />
             } 
           />
+          <Route
+            path="/attributes"
+            element={
+              <Attributes
+                attributes={attributes}
+                onUpdateAttributes={setAttributes}
+              />
+            }
+          />
           <Route 
             path="/settings" 
             element={
@@ -186,6 +198,7 @@ const App = () => {
             initialData={editingProduct}
             onSave={handleSaveProduct}
             onClose={() => setIsModalOpen(false)}
+            attributes={attributes}
           />
         )}
       </Layout>
